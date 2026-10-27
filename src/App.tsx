@@ -38,28 +38,44 @@ import {
   ROLE_LABELS,
   ROLE_ORDER,
   SPECIAL_ROLES,
+  activeLucky,
   advanceNight,
   announceDawn,
+  beginKnight,
   beginPk,
+  beginWhiteWolf,
+  canWhiteWolfTake,
   canWitchSave,
   completeElection,
   createGame,
   explode,
   finishBadge,
+  finishCharmResult,
+  finishFoolReveal,
   finishHunter,
+  finishKnight,
   finishSpeech,
   finishVote,
-  hunterStatus,
+  finishWhiteWolf,
+  gunStatus,
+  hydrateGame,
+  isWolf,
   living,
   nightError,
   nightPhases,
   playerCount,
   playerLabel,
+  packAlive,
   resolveManualWinner,
   roleCounts,
+  roleName,
   rolePlayer,
+  seenRole,
+  seerSeesWolf,
   settleNight,
+  shadowSkillType,
   tallyVotes,
+  votablePlayers,
   type Board,
   type Game,
   type NightPhase,
@@ -96,22 +112,37 @@ function loadSaved(): SavedState | null {
       !Array.isArray(saved.history)
     )
       return null;
-    return saved;
+    return {
+      ...saved,
+      rules: { ...DEFAULT_RULES, ...saved.rules },
+      game: saved.game ? hydrateGame(saved.game) : null,
+      history: saved.history.map(hydrateGame),
+    };
   } catch {
     return null;
   }
 }
 
 const phaseTitles: Record<Game["phase"], string> = {
+  merchant: "奇迹商人交易",
+  shadowLearn: "隐狼模仿",
   guard: "守卫行动",
   wolf: "狼人行动",
+  wolfBeauty: "狼美人魅惑",
+  shadowSkill: "隐狼技能",
   witch: "女巫行动",
   seer: "预言家行动",
+  mirror: "魔镜少女查验",
+  lucky: "幸运儿行动",
   hunterStatus: "猎人状态",
   resolve: "夜晚结算",
   election: "警长竞选",
   dawn: "公布昨夜死讯",
   hunter: "猎人技能",
+  whiteWolfSkill: "白狼王自爆",
+  knightDuel: "骑士决斗",
+  foolReveal: "愚者翻牌",
+  charmResult: "狼美人殉情",
   badge: "警徽移交",
   speech: "白天发言",
   vote: "放逐投票",
@@ -119,21 +150,30 @@ const phaseTitles: Record<Game["phase"], string> = {
 };
 
 const nightShort: Record<NightPhase, string> = {
+  merchant: "商人",
+  shadowLearn: "隐狼",
   guard: "守卫",
   wolf: "狼人",
+  wolfBeauty: "狼美人",
+  shadowSkill: "隐狼技能",
   witch: "女巫",
   seer: "预言家",
+  mirror: "魔镜",
+  lucky: "幸运儿",
   hunterStatus: "猎人",
   resolve: "结算",
 };
 
 function RoleIcon({ role, size = 17 }: { role: Role; size?: number }) {
   const props = { size, strokeWidth: 1.7 };
-  if (role === "wolf") return <MoonStar {...props} />;
+  if (isWolf(role)) return <MoonStar {...props} />;
   if (role === "villager") return <Users {...props} />;
-  if (role === "seer") return <Eye {...props} />;
+  if (role === "seer" || role === "mirror") return <Eye {...props} />;
   if (role === "witch") return <FlaskConical {...props} />;
   if (role === "hunter") return <Crosshair {...props} />;
+  if (role === "knight") return <Swords {...props} />;
+  if (role === "merchant") return <Sparkles {...props} />;
+  if (role === "fool") return <BookOpen {...props} />;
   return <Shield {...props} />;
 }
 
@@ -397,6 +437,69 @@ function RulesForm({
               <option value="yes">PK 玩家可以投票</option>
             </select>
           </label>
+          <label className="rule-field">
+            <span>隐狼规则版本</span>
+            <select
+              value={rules.hiddenVariant}
+              onChange={(event) =>
+                change(
+                  "hiddenVariant",
+                  event.target.value as Rules["hiddenVariant"],
+                )
+              }
+            >
+              <option value="awakened">觉醒隐狼（守护可重复）</option>
+              <option value="mechanical">机械狼（守护仅一次）</option>
+            </select>
+          </label>
+          <label className="rule-field">
+            <span>狼王夜间出局</span>
+            <select
+              value={rules.wolfKingNightGun ? "yes" : "no"}
+              onChange={(event) =>
+                change("wolfKingNightGun", event.target.value === "yes")
+              }
+            >
+              <option value="yes">符合条件可开枪</option>
+              <option value="no">夜间不能开枪</option>
+            </select>
+          </label>
+          <label className="rule-field">
+            <span>被白狼王带走的枪手</span>
+            <select
+              value={rules.gunByWhiteWolf ? "yes" : "no"}
+              onChange={(event) =>
+                change("gunByWhiteWolf", event.target.value === "yes")
+              }
+            >
+              <option value="no">不能开枪</option>
+              <option value="yes">可开枪</option>
+            </select>
+          </label>
+          <label className="rule-field">
+            <span>最后一狼出局时技能</span>
+            <select
+              value={rules.lastWolfSkill ? "yes" : "no"}
+              onChange={(event) =>
+                change("lastWolfSkill", event.target.value === "yes")
+              }
+            >
+              <option value="no">技能失效</option>
+              <option value="yes">仍可发动</option>
+            </select>
+          </label>
+          <label className="rule-field">
+            <span>隐狼双刀同一人</span>
+            <select
+              value={rules.doubleKnifePierces ? "yes" : "no"}
+              onChange={(event) =>
+                change("doubleKnifePierces", event.target.value === "yes")
+              }
+            >
+              <option value="yes">无视守护和解药</option>
+              <option value="no">按普通狼刀结算</option>
+            </select>
+          </label>
         </div>
         <p className="rule-explainer">
           守卫不能连续守同一人；毒药无视守护，被毒的猎人不能开枪。规则将在开始后固定。
@@ -429,13 +532,17 @@ function SetupSummary({
         <div>
           <small>当前板子</small>
           <strong>
-            {playerCount(board)} 人 · {board.name}
+            {board.expectedCount ?? playerCount(board)} 人 · {board.name}
           </strong>
         </div>
       </div>
       <div className="rail-divider" />
       <div className="rail-subhead">
-        身份配置 <span>{playerCount(board)} 张</span>
+        身份配置{" "}
+        <span>
+          {playerCount(board)}
+          {board.expectedCount ? ` / ${board.expectedCount}` : ""} 张
+        </span>
       </div>
       <div className="role-list">
         {ROLE_ORDER.filter((role) => counts[role] > 0).map((role) => (
@@ -443,7 +550,7 @@ function SetupSummary({
             <span className={`role-mini ${role}`}>
               <RoleIcon role={role} size={15} />
             </span>
-            <span>{ROLE_LABELS[role]}</span>
+            <span>{roleName(role, rules)}</span>
             <strong>× {counts[role]}</strong>
           </div>
         ))}
@@ -495,6 +602,9 @@ function SetupView({
   setSetupStep: (step: SetupStep) => void;
   onStart: () => void;
 }) {
+  const [boardFilter, setBoardFilter] = useState<"all" | "6" | "10" | "12">(
+    "all",
+  );
   const count = playerCount(board);
   const counts = roleCounts(board);
   const assignedCounts = ROLE_ORDER.reduce(
@@ -505,11 +615,17 @@ function SetupView({
     {} as Record<Role, number>,
   );
   const setupError =
-    count < 5 || count > 20
-      ? "请将玩家人数设置为 5 至 20 人。"
-      : rules.victory === "edge" && board.specials.length === 0
-        ? "屠边规则需要至少一张神职牌。"
-        : null;
+    board.expectedCount && count !== board.expectedCount
+      ? `该板子还缺 ${board.expectedCount - count} 张身份，请先选择补充身份。`
+      : count < 5 || count > 20
+        ? "请将玩家人数设置为 5 至 20 人。"
+        : rules.victory === "edge" &&
+            !ROLE_ORDER.some(
+              (role) =>
+                role !== "villager" && !isWolf(role) && counts[role] > 0,
+            )
+          ? "屠边规则需要至少一张神职牌。"
+          : null;
   const seatsValid =
     assignments.length === count &&
     assignments.every(Boolean) &&
@@ -563,8 +679,31 @@ function SetupView({
                 title="选择板子"
                 description="从常用配置开始，也可以自定义人数。"
               />
+              <div
+                className="board-filter"
+                role="group"
+                aria-label="按人数筛选板子"
+              >
+                {(["all", "6", "10", "12"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={boardFilter === filter ? "active" : ""}
+                    aria-pressed={boardFilter === filter}
+                    onClick={() => setBoardFilter(filter)}
+                  >
+                    {filter === "all" ? "全部板子" : `${filter} 人`}
+                  </button>
+                ))}
+                <span>向下滚动查看更多</span>
+              </div>
               <div className="board-grid">
-                {PRESETS.map((preset) => (
+                {PRESETS.filter(
+                  (preset) =>
+                    boardFilter === "all" ||
+                    (preset.expectedCount ?? playerCount(preset)) ===
+                      Number(boardFilter),
+                ).map((preset) => (
                   <button
                     className={`board-card${board.id === preset.id ? " selected" : ""}`}
                     key={preset.id}
@@ -581,13 +720,18 @@ function SetupView({
                       </span>
                     </span>
                     <span className="board-size">
-                      {playerCount(preset)}
+                      {preset.expectedCount ?? playerCount(preset)}
                       <small> 人局</small>
                     </span>
                     <strong>{preset.name}</strong>
                     <span className="board-detail">
-                      {preset.wolves} 狼 / {preset.villagers} 民 /{" "}
-                      {preset.specials.length} 神
+                      {preset.wolves + preset.specials.filter(isWolf).length} 狼
+                      / {preset.villagers} 民 /{" "}
+                      {preset.specials.filter((role) => !isWolf(role)).length}{" "}
+                      神
+                      {preset.expectedCount && !preset.extraRole
+                        ? " · 缺 1"
+                        : ""}
                     </span>
                   </button>
                 ))}
@@ -618,6 +762,44 @@ function SetupView({
                   <span className="board-detail">按现场人数设置</span>
                 </button>
               </div>
+              {board.note && (
+                <div className="board-notice">
+                  <AlertCircle size={16} />
+                  <span>
+                    {board.id === "10-white-knight" && board.extraRole
+                      ? `已补充第 10 张：${ROLE_LABELS[board.extraRole]}。请与你的现场配置核对。`
+                      : board.note}
+                  </span>
+                </div>
+              )}
+              {board.expectedCount && (
+                <label className="rule-field missing-role">
+                  <span>补充第 10 张身份</span>
+                  <select
+                    value={board.extraRole ?? ""}
+                    onChange={(event) =>
+                      updateCustom({
+                        ...board,
+                        extraRole: (event.target.value || null) as Role | null,
+                      })
+                    }
+                  >
+                    <option value="">请选择缺失的身份</option>
+                    {ROLE_ORDER.filter(
+                      (role) =>
+                        role === "wolf" ||
+                        role === "villager" ||
+                        !board.specials.includes(
+                          role as Exclude<Role, "wolf" | "villager">,
+                        ),
+                    ).map((role) => (
+                      <option key={role} value={role}>
+                        {ROLE_LABELS[role]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {board.id === "custom" && (
                 <div className="custom-settings">
                   <div className="custom-counts">
@@ -659,7 +841,7 @@ function SetupView({
                     </label>
                   </div>
                   <div className="custom-specials">
-                    <span>神职角色</span>
+                    <span>特殊角色</span>
                     {SPECIAL_ROLES.map((role) => (
                       <label key={role}>
                         <input
@@ -765,7 +947,7 @@ function SetupView({
                               assignedCounts[role] >= counts[role]
                             }
                           >
-                            {ROLE_LABELS[role]}（剩余{" "}
+                            {roleName(role, rules)}（剩余{" "}
                             {counts[role] -
                               assignedCounts[role] +
                               Number(selected === role)}
@@ -786,7 +968,7 @@ function SetupView({
                     assignedCounts[role] === counts[role] ? "complete" : ""
                   }
                 >
-                  {ROLE_LABELS[role]}{" "}
+                  {roleName(role, rules)}{" "}
                   <strong>
                     {assignedCounts[role]}/{counts[role]}
                   </strong>
@@ -852,7 +1034,11 @@ function TargetGrid({
           <strong>{String(player.id).padStart(2, "0")}</strong>
           <span>
             {blocked?.[player.id] ||
-              (showRoles ? ROLE_LABELS[player.role] : "号玩家")}
+              (showRoles
+                ? player.role === "shadow"
+                  ? "隐狼"
+                  : ROLE_LABELS[player.role]
+                : "号玩家")}
           </span>
         </button>
       ))}
@@ -897,18 +1083,18 @@ function GameRail({ game, onLog }: { game: Game; onLog: () => void }) {
             </span>
             <span className={`roster-role ${player.role}`}>
               <RoleIcon role={player.role} size={14} />
-              {ROLE_LABELS[player.role]}
+              {roleName(player.role, game.rules)}
             </span>
             {game.sheriff === player.id && (
               <Crown className="crown-icon" size={14} />
             )}
             <span className="roster-status">
-              {player.alive ? "存活" : "出局"}
+              {player.alive ? (player.revealed ? "翻牌" : "存活") : "出局"}
             </span>
           </div>
         ))}
       </div>
-      {game.board.specials.includes("witch") && (
+      {roleCounts(game.board).witch > 0 && (
         <>
           <div className="rail-divider" />
           <div className="rail-subhead">女巫药剂</div>
@@ -926,7 +1112,7 @@ function GameRail({ game, onLog }: { game: Game; onLog: () => void }) {
           </div>
         </>
       )}
-      {game.board.specials.includes("guard") && (
+      {roleCounts(game.board).guard > 0 && (
         <div className="last-guard">
           最近守护{" "}
           <strong>{game.lastGuard ? playerLabel(game.lastGuard) : "无"}</strong>
@@ -1020,7 +1206,7 @@ function StagePanel({
   const activeRole = (role: Role) => Boolean(rolePlayer(game, role));
   const updateAction = (
     key: keyof Game["actions"],
-    value: number | Game["actions"]["witch"] | null,
+    value: Game["actions"][keyof Game["actions"]],
   ) =>
     draft((current) => ({
       ...current,
@@ -1047,6 +1233,163 @@ function StagePanel({
   const nightNext = () => commit(advanceNight(game));
   const nightWarning = nightError(game);
 
+  if (game.phase === "merchant") {
+    const merchant = rolePlayer(game, "merchant");
+    const target = game.players.find(
+      (player) => player.id === game.actions.merchant,
+    );
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / MERCHANT</span>
+            <h2>奇迹商人请睁眼</h2>
+            <p>全局可交易一次：选择他人并赠送查验、毒药或守护。</p>
+          </div>
+          <span className="stage-icon">
+            <Sparkles size={22} />
+          </span>
+        </div>
+        <Cue>奇迹商人请睁眼，今晚是否进行交易？</Cue>
+        {!merchant ? (
+          disabledRole("merchant")
+        ) : game.merchantUsed ? (
+          <div className="inactive-role">
+            <CheckCircle2 size={18} />
+            <div>
+              <strong>交易机会已使用</strong>
+              <p>可保留播报，直接继续。</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="field-heading">
+              选择交易对象 <span>不能选择商人自己</span>
+            </div>
+            <TargetGrid
+              players={alive.filter((player) => player.id !== merchant.id)}
+              selected={game.actions.merchant}
+              onSelect={(id) => updateAction("merchant", id)}
+              passLabel="暂不交易"
+            />
+            {target && (
+              <>
+                <div className="field-heading">
+                  选择赠送技能 <span>若对象为狼人，交易失败且商人出局</span>
+                </div>
+                <div className="witch-actions">
+                  {(
+                    [
+                      ["check", "查验"],
+                      ["poison", "毒药"],
+                      ["guard", "守护"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={game.actions.gift === value ? "selected" : ""}
+                      onClick={() => updateAction("gift", value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="inline-hint">
+                  仅法官可见：
+                  {isWolf(target.role)
+                    ? "交易对象属于狼人阵营，交易将失败。"
+                    : "交易对象为好人，幸运儿可在当晚或之后使用一次。"}
+                </p>
+              </>
+            )}
+          </>
+        )}
+        {footer(nightNext, "确认商人行动", nightWarning)}
+      </div>
+    );
+  }
+
+  if (game.phase === "shadowLearn") {
+    const shadow = rolePlayer(game, "shadow");
+    const target = game.players.find(
+      (player) => player.id === game.actions.shadowLearn,
+    );
+    const allowed: Role[] = [
+      "wolf",
+      "villager",
+      "seer",
+      "witch",
+      "hunter",
+      "guard",
+      "mirror",
+    ];
+    const blocked = Object.fromEntries(
+      alive
+        .filter((player) => !allowed.includes(player.role))
+        .map((player) => [player.id, "暂不支持"]),
+    );
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / SHADOW</span>
+            <h2>
+              {game.rules.hiddenVariant === "mechanical"
+                ? "机械狼"
+                : "觉醒隐狼"}
+              请睁眼
+            </h2>
+            <p>可在任意夜晚模仿一名玩家，全局限一次。</p>
+          </div>
+          <span className="stage-icon wolf">
+            <MoonStar size={22} />
+          </span>
+        </div>
+        <Cue>隐狼请睁眼，今晚是否模仿一名玩家？</Cue>
+        {!shadow ? (
+          disabledRole("shadow")
+        ) : game.shadowLearned ? (
+          <div className="inactive-role">
+            <CheckCircle2 size={18} />
+            <div>
+              <strong>已模仿：{ROLE_LABELS[game.shadowLearned]}</strong>
+              <p>身份立即生效，其他技能从下一夜起使用；猎人枪从当夜生效。</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="field-heading">
+              选择模仿目标 <span>不与其他狼人见面，不能模仿自己</span>
+            </div>
+            <TargetGrid
+              players={alive.filter((player) => player.id !== shadow.id)}
+              selected={game.actions.shadowLearn}
+              onSelect={(id) => updateAction("shadowLearn", id)}
+              passLabel="暂不模仿"
+              blocked={blocked}
+            />
+            {target && (
+              <div className="seer-result">
+                <Eye size={18} />
+                <div>
+                  <small>向隐狼示意目标真实身份</small>
+                  <strong>
+                    {playerLabel(target.id)}是{ROLE_LABELS[target.role]}
+                  </strong>
+                </div>
+              </div>
+            )}
+            <p className="inline-hint">
+              当前支持模仿普狼、平民、预言家、魔镜、女巫、守卫和猎人；其他特殊角色需线下裁定。
+            </p>
+          </>
+        )}
+        {footer(nightNext, "确认模仿", nightWarning)}
+      </div>
+    );
+  }
+
   if (game.phase === "guard")
     return (
       <div className="stage-card">
@@ -1071,9 +1414,11 @@ function StagePanel({
               selected={game.actions.guard}
               onSelect={(id) => updateAction("guard", id)}
               passLabel="空守"
-              blocked={
-                game.lastGuard ? { [game.lastGuard]: "上夜守护" } : undefined
-              }
+              blocked={Object.fromEntries(
+                [game.lastGuard, game.lastLuckyGuard]
+                  .filter((id): id is number => Boolean(id))
+                  .map((id) => [id, "上夜守护"]),
+              )}
             />
           </>
         ) : (
@@ -1089,14 +1434,26 @@ function StagePanel({
         <div className="stage-head">
           <div>
             <span className="step-eyebrow">NIGHT ACTION / WOLVES</span>
-            <h2>狼人请睁眼</h2>
-            <p>记录狼人商议后的刀口，也支持空刀或自刀。</p>
+            <h2>
+              {rolePlayer(game, "shadow") && !packAlive(game)
+                ? "隐狼单独带刀"
+                : "狼人请睁眼"}
+            </h2>
+            <p>
+              {rolePlayer(game, "shadow") && packAlive(game)
+                ? "隐狼不与狼队见面；只记录其他狼人的刀口。"
+                : "记录狼人商议后的刀口，也支持空刀或自刀。"}
+            </p>
           </div>
           <span className="stage-icon wolf">
             <MoonStar size={22} />
           </span>
         </div>
-        <Cue>狼人请睁眼，今晚你们要袭击谁？</Cue>
+        <Cue>
+          {rolePlayer(game, "shadow") && !packAlive(game)
+            ? "隐狼请单独睁眼，今晚你要袭击谁？"
+            : "狼人请睁眼，今晚你们要袭击谁？"}
+        </Cue>
         <div className="field-heading">
           选择狼刀目标 <span>只记录狼人最终达成的选择</span>
         </div>
@@ -1105,10 +1462,142 @@ function StagePanel({
           selected={game.actions.wolf}
           onSelect={(id) => updateAction("wolf", id)}
           passLabel="空刀"
+          blocked={Object.fromEntries(
+            alive
+              .filter((player) => player.role === "wolfBeauty")
+              .map((player) => [player.id, "不可自刀"]),
+          )}
         />
         {footer(nightNext, "确认狼刀", nightWarning)}
       </div>
     );
+
+  if (game.phase === "wolfBeauty") {
+    const beauty = rolePlayer(game, "wolfBeauty");
+    const blocked = Object.fromEntries(
+      [beauty?.id, game.lastBeauty]
+        .filter((id): id is number => Boolean(id))
+        .map((id) => [id, id === beauty?.id ? "不可自魅" : "上夜魅惑"]),
+    );
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / BEAUTY</span>
+            <h2>狼美人请睁眼</h2>
+            <p>选择魅惑目标；狼美人出局时目标可能殉情。</p>
+          </div>
+          <span className="stage-icon wolf">
+            <MoonStar size={22} />
+          </span>
+        </div>
+        <Cue>狼美人请睁眼，今晚你要魅惑谁？</Cue>
+        {beauty ? (
+          <>
+            <div className="field-heading">
+              选择魅惑目标 <span>不能连续魅惑同一人</span>
+            </div>
+            <TargetGrid
+              players={alive}
+              selected={game.actions.wolfBeauty}
+              onSelect={(id) => updateAction("wolfBeauty", id)}
+              passLabel="空魅"
+              blocked={blocked}
+            />
+          </>
+        ) : (
+          disabledRole("wolfBeauty")
+        )}
+        {footer(nightNext, "确认魅惑", nightWarning)}
+      </div>
+    );
+  }
+
+  if (game.phase === "shadowSkill") {
+    const skill = shadowSkillType(game);
+    const target = game.players.find(
+      (player) => player.id === game.actions.shadowSkill,
+    );
+    const title =
+      skill === "guard"
+        ? "隐狼守护"
+        : skill === "poison"
+          ? "隐狼毒药"
+          : skill === "check"
+            ? "隐狼查验"
+            : skill === "double"
+              ? "隐狼额外刀"
+              : "隐狼技能状态";
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / SHADOW SKILL</span>
+            <h2>{title}</h2>
+            <p>隐狼与狼队互不见面，模仿技能按所选版本结算。</p>
+          </div>
+          <span className="stage-icon wolf">
+            <MoonStar size={22} />
+          </span>
+        </div>
+        <Cue>隐狼请单独睁眼，是否使用已获得的技能？</Cue>
+        {skill ? (
+          <>
+            <div className="field-heading">
+              选择技能目标{" "}
+              <span>
+                {skill === "guard"
+                  ? "可挡狼刀与毒药"
+                  : skill === "poison"
+                    ? "毒药全局一次"
+                    : skill === "double"
+                      ? "额外刀全局一次"
+                      : "不可重复查验"}
+              </span>
+            </div>
+            <TargetGrid
+              players={alive}
+              selected={game.actions.shadowSkill}
+              onSelect={(id) => updateAction("shadowSkill", id)}
+              passLabel="暂不使用"
+              blocked={
+                skill === "check"
+                  ? Object.fromEntries(
+                      game.shadowSeen.map((id) => [id, "已查验"]),
+                    )
+                  : undefined
+              }
+            />
+            {skill === "check" && target && (
+              <div className="seer-result">
+                <Eye size={18} />
+                <div>
+                  <small>向隐狼示意</small>
+                  <strong>
+                    {playerLabel(target.id)}：
+                    {game.shadowLearned === "seer"
+                      ? seerSeesWolf(game, target)
+                        ? "狼人"
+                        : "好人"
+                      : roleName(seenRole(game, target), game.rules)}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="inactive-role">
+            <AlertCircle size={18} />
+            <div>
+              <strong>今晚没有可使用的模仿技能</strong>
+              <p>当夜模仿的技能通常从下一夜使用；学普狼后须等其他狼人出局。</p>
+            </div>
+          </div>
+        )}
+        {footer(nightNext, "确认隐狼技能", nightWarning)}
+      </div>
+    );
+  }
 
   if (game.phase === "witch") {
     const canSave = canWitchSave(game);
@@ -1252,14 +1741,16 @@ function StagePanel({
             />
             {target && (
               <div
-                className={`seer-result${target.role === "wolf" ? " is-wolf" : ""}`}
+                className={`seer-result${seerSeesWolf(game, target) ? " is-wolf" : ""}`}
               >
                 <Eye size={18} />
                 <div>
                   <small>向预言家示意</small>
                   <strong>
                     {playerLabel(target.id)}是
-                    {target.role === "wolf" ? "狼人（查杀）" : "好人（金水）"}
+                    {seerSeesWolf(game, target)
+                      ? "狼人（查杀）"
+                      : "好人（金水）"}
                   </strong>
                 </div>
               </div>
@@ -1273,44 +1764,204 @@ function StagePanel({
     );
   }
 
+  if (game.phase === "mirror") {
+    const target = game.players.find(
+      (player) => player.id === game.actions.mirror,
+    );
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / MIRROR</span>
+            <h2>魔镜少女请睁眼</h2>
+            <p>查验一名玩家显示的具体身份，不可重复查验。</p>
+          </div>
+          <span className="stage-icon seer">
+            <Eye size={22} />
+          </span>
+        </div>
+        <Cue>魔镜少女请睁眼，今晚要查验谁？</Cue>
+        {activeRole("mirror") ? (
+          <>
+            <div className="field-heading">
+              选择查验目标 <span>隐狼模仿后显示模仿身份</span>
+            </div>
+            <TargetGrid
+              players={alive}
+              selected={game.actions.mirror}
+              onSelect={(id) => updateAction("mirror", id)}
+              passLabel="不查验"
+              blocked={Object.fromEntries(
+                game.mirrorSeen.map((id) => [id, "已查验"]),
+              )}
+            />
+            {target && (
+              <div className="seer-result">
+                <Eye size={18} />
+                <div>
+                  <small>向魔镜少女示意</small>
+                  <strong>
+                    {playerLabel(target.id)}显示为
+                    {roleName(seenRole(game, target), game.rules)}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          disabledRole("mirror")
+        )}
+        {footer(nightNext, "确认魔镜查验", nightWarning)}
+      </div>
+    );
+  }
+
+  if (game.phase === "lucky") {
+    const lucky = activeLucky(game);
+    const recipient =
+      lucky && game.players.find((player) => player.id === lucky.recipient);
+    const target = game.players.find(
+      (player) => player.id === game.actions.lucky,
+    );
+    const blocked: Record<number, string> = {};
+    if (lucky?.skill === "guard" && recipient?.role === "guard")
+      for (const id of [
+        game.actions.guard,
+        game.previousGuard,
+        game.previousLuckyGuard,
+      ])
+        if (id) blocked[id] = "不可重复守护";
+    if (
+      lucky?.skill === "poison" &&
+      recipient?.role === "witch" &&
+      game.actions.poison
+    )
+      blocked[game.actions.poison] = "当晚已毒";
+    if (
+      lucky?.skill === "check" &&
+      recipient?.role === "seer" &&
+      game.actions.seer
+    )
+      blocked[game.actions.seer] = "当晚已查";
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">NIGHT ACTION / LUCKY</span>
+            <h2>幸运儿行动</h2>
+            <p>幸运儿可当夜或之后任意一夜使用一次获得的技能。</p>
+          </div>
+          <span className="stage-icon">
+            <Sparkles size={22} />
+          </span>
+        </div>
+        <Cue>幸运儿请睁眼，今晚是否使用获得的技能？</Cue>
+        {lucky ? (
+          <>
+            <div className="knife-info">
+              <span>幸运儿</span>
+              <strong>{playerLabel(lucky.recipient)}</strong>
+              <small>
+                获得：
+                {lucky.skill === "check"
+                  ? "查验"
+                  : lucky.skill === "poison"
+                    ? "毒药"
+                    : "守护"}
+              </small>
+            </div>
+            <div className="field-heading">
+              选择技能目标 <span>也可暂不使用</span>
+            </div>
+            <TargetGrid
+              players={alive}
+              selected={game.actions.lucky}
+              onSelect={(id) => updateAction("lucky", id)}
+              passLabel="暂不使用"
+              blocked={blocked}
+            />
+            {lucky.skill === "check" && target && (
+              <div className="seer-result">
+                <Eye size={18} />
+                <div>
+                  <small>向幸运儿示意</small>
+                  <strong>
+                    {playerLabel(target.id)}是
+                    {seerSeesWolf(game, target) ? "狼人" : "好人"}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="inactive-role">
+            <AlertCircle size={18} />
+            <div>
+              <strong>当前没有可行动的幸运儿</strong>
+              <p>交易失败、未交易、技能已用或幸运儿已出局时，直接继续。</p>
+            </div>
+          </div>
+        )}
+        {footer(nightNext, "确认幸运儿行动", nightWarning)}
+      </div>
+    );
+  }
+
   if (game.phase === "hunterStatus") {
-    const status = hunterStatus(game);
+    const actors = (["hunter", "wolfKing", "shadow"] as const).filter(
+      (role) =>
+        roleCounts(game.board)[role] > 0 &&
+        (role !== "shadow" || game.shadowLearned === "hunter"),
+    );
     return (
       <div className="stage-card">
         <div className="stage-head">
           <div>
             <span className="step-eyebrow">NIGHT ACTION / HUNTER</span>
-            <h2>确认猎人状态</h2>
-            <p>根据今晚的行动，向猎人示意是否可以发动技能。</p>
+            <h2>确认枪手状态</h2>
+            <p>根据全部夜间行动，分别向枪手示意技能状态。</p>
           </div>
           <span className="stage-icon hunter">
             <Crosshair size={22} />
           </span>
         </div>
-        <Cue>猎人请睁眼，请确认你的开枪状态。</Cue>
-        {status === "absent" ? (
-          disabledRole("hunter")
-        ) : (
-          <div className={`hunter-status ${status}`}>
-            <span>
-              {status === "can" ? (
-                <CheckCircle2 size={23} />
-              ) : (
-                <AlertCircle size={23} />
-              )}
-            </span>
+        <Cue>请依次单独睁眼，确认你的开枪状态。</Cue>
+        {actors.length === 0 && (
+          <div className="inactive-role">
+            <AlertCircle size={18} />
             <div>
-              <strong>
-                {status === "can" ? "今晚状态：可以开枪" : "今晚状态：不能开枪"}
-              </strong>
-              <p>
-                {status === "can"
-                  ? "若符合出局条件，天亮后可选择是否发动技能。"
-                  : "依据中毒或本局奶穿规则，猎人不能发动技能。"}
-              </p>
+              <strong>今晚没有可确认的枪手</strong>
+              <p>直接进入下一步。</p>
             </div>
           </div>
         )}
+        {actors.map((role) => {
+          const status = gunStatus(game, role);
+          return status === "absent" ? (
+            <div key={role}>{disabledRole(role)}</div>
+          ) : (
+            <div className={`hunter-status ${status}`} key={role}>
+              <span>
+                {status === "can" ? (
+                  <CheckCircle2 size={23} />
+                ) : (
+                  <AlertCircle size={23} />
+                )}
+              </span>
+              <div>
+                <strong>
+                  {roleName(role, game.rules)}：
+                  {status === "can" ? "可以开枪" : "不能开枪"}
+                </strong>
+                <p>
+                  {status === "can"
+                    ? "若符合出局条件，天亮后可选择是否发动技能。"
+                    : "依据出局原因、最后一狼或本局桌规，不能发动技能。"}
+                </p>
+              </div>
+            </div>
+          );
+        })}
         {footer(nightNext, "进入夜晚结算")}
       </div>
     );
@@ -1334,8 +1985,7 @@ function StagePanel({
           <div>
             <span>守卫</span>
             <strong>
-              {game.board.specials.includes("guard") &&
-              game.actions.guard !== null
+              {roleCounts(game.board).guard > 0 && game.actions.guard !== null
                 ? game.actions.guard
                   ? `守护 ${playerLabel(game.actions.guard)}`
                   : "空守"
@@ -1370,6 +2020,54 @@ function StagePanel({
                 : "未查验"}
             </strong>
           </div>
+          {roleCounts(game.board).wolfBeauty > 0 && (
+            <div>
+              <span>狼美人</span>
+              <strong>
+                {game.actions.wolfBeauty
+                  ? `魅惑 ${playerLabel(game.actions.wolfBeauty)}`
+                  : "空魅"}
+              </strong>
+            </div>
+          )}
+          {roleCounts(game.board).merchant > 0 && (
+            <div>
+              <span>商人与幸运儿</span>
+              <strong>
+                {game.actions.merchant
+                  ? `交易 ${playerLabel(game.actions.merchant)}`
+                  : "未交易"}
+                {game.actions.lucky
+                  ? ` / 技能目标 ${playerLabel(game.actions.lucky)}`
+                  : ""}
+              </strong>
+            </div>
+          )}
+          {roleCounts(game.board).shadow > 0 && (
+            <div>
+              <span>隐狼</span>
+              <strong>
+                {game.actions.shadowLearn
+                  ? `模仿 ${playerLabel(game.actions.shadowLearn)}`
+                  : game.shadowLearned
+                    ? `已模仿 ${ROLE_LABELS[game.shadowLearned]}`
+                    : "未模仿"}
+                {game.actions.shadowSkill
+                  ? ` / 技能目标 ${playerLabel(game.actions.shadowSkill)}`
+                  : ""}
+              </strong>
+            </div>
+          )}
+          {roleCounts(game.board).mirror > 0 && (
+            <div>
+              <span>魔镜少女</span>
+              <strong>
+                {game.actions.mirror
+                  ? `查验 ${playerLabel(game.actions.mirror)}`
+                  : "未查验"}
+              </strong>
+            </div>
+          )}
         </div>
         {footer(() => commit(settleNight(game)), "结算今夜")}
       </div>
@@ -1468,22 +2166,168 @@ function StagePanel({
       </div>
     );
 
+  if (game.phase === "whiteWolfSkill") {
+    const canTake = canWhiteWolfTake(game);
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">SPECIAL SKILL / WHITE WOLF</span>
+            <h2>白狼王自爆</h2>
+            <p>{playerLabel(game.specialActor)}选择自爆，记录是否带走一人。</p>
+          </div>
+          <span className="stage-icon wolf">
+            <MoonStar size={22} />
+          </span>
+        </div>
+        <Cue>白狼王是否发动技能带走一名玩家？</Cue>
+        {!canTake && (
+          <div className="note-box warning">
+            <AlertCircle size={16} />{" "}
+            本局设置为最后一狼出局时技能失效，请选择不带人。
+          </div>
+        )}
+        <div className="field-heading">选择带走目标</div>
+        <TargetGrid
+          players={
+            canTake
+              ? alive.filter((player) => player.id !== game.specialActor)
+              : []
+          }
+          selected={game.specialTarget}
+          onSelect={(id) =>
+            draft((current) => ({ ...current, specialTarget: id }))
+          }
+          passLabel="不带人"
+        />
+        {footer(
+          () => commit(finishWhiteWolf(game)),
+          "确认自爆",
+          game.specialTarget === null ? "请选择目标或不带人。" : null,
+        )}
+      </div>
+    );
+  }
+
+  if (game.phase === "knightDuel") {
+    const target = game.players.find(
+      (player) => player.id === game.specialTarget,
+    );
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">SPECIAL SKILL / KNIGHT</span>
+            <h2>骑士决斗</h2>
+            <p>
+              每局限一次；戳中狼人则狼人出局并进入黑夜，戳中好人则骑士出局、继续白天。
+            </p>
+          </div>
+          <span className="stage-icon">
+            <Swords size={22} />
+          </span>
+        </div>
+        <Cue>骑士请选择一名玩家进行决斗。</Cue>
+        <div className="field-heading">
+          选择决斗目标 <span>不能选择骑士自己</span>
+        </div>
+        <TargetGrid
+          players={alive.filter((player) => player.id !== game.specialActor)}
+          selected={game.specialTarget}
+          onSelect={(id) =>
+            draft((current) => ({ ...current, specialTarget: id }))
+          }
+        />
+        {target && (
+          <div className="seer-result">
+            <Swords size={18} />
+            <div>
+              <small>仅法官可见</small>
+              <strong>
+                {isWolf(target.role)
+                  ? `${playerLabel(target.id)}是狼人，将出局并进入黑夜`
+                  : `${playerLabel(target.id)}是好人，骑士将出局并继续白天`}
+              </strong>
+            </div>
+          </div>
+        )}
+        {footer(
+          () => commit(finishKnight(game)),
+          "确认决斗",
+          game.specialTarget === null ? "请选择决斗目标。" : null,
+        )}
+      </div>
+    );
+  }
+
+  if (game.phase === "foolReveal")
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">SPECIAL SKILL / FOOL</span>
+            <h2>愚者翻牌免死</h2>
+            <p>
+              {playerLabel(game.specialActor)}
+              翻牌，本次放逐无效。之后仍存活并可发言，但不能投票、被投票或接警徽。
+            </p>
+          </div>
+          <span className="stage-icon">
+            <BookOpen size={22} />
+          </span>
+        </div>
+        <Cue>该玩家翻牌发动技能，本次免于放逐。</Cue>
+        {footer(() => commit(finishFoolReveal(game)), "确认翻牌，继续")}
+      </div>
+    );
+
+  if (game.phase === "charmResult")
+    return (
+      <div className="stage-card">
+        <div className="stage-head">
+          <div>
+            <span className="step-eyebrow">SPECIAL SKILL / BEAUTY</span>
+            <h2>狼美人魅惑生效</h2>
+            <p>
+              {game.charmDeaths.map(playerLabel).join("、")}
+              随狼美人殉情出局，殉情者不能发动技能。
+            </p>
+          </div>
+          <span className="stage-icon wolf">
+            <MoonStar size={22} />
+          </span>
+        </div>
+        <Cue>被魅惑的玩家一同出局。</Cue>
+        {footer(() => commit(finishCharmResult(game)), "确认殉情，继续")}
+      </div>
+    );
+
   if (game.phase === "hunter")
     return (
       <div className="stage-card">
         <div className="stage-head">
           <div>
             <span className="step-eyebrow">SPECIAL SKILL / HUNTER</span>
-            <h2>猎人可以开枪</h2>
-            <p>猎人符合发动条件，请记录开枪目标或选择压枪。</p>
+            <h2>
+              {roleName(
+                game.players.find((player) => player.id === game.gunActor)
+                  ?.role ?? "hunter",
+                game.rules,
+              )}
+              可以开枪
+            </h2>
+            <p>
+              {playerLabel(game.gunActor)}
+              符合发动条件，请记录开枪目标或选择压枪。
+            </p>
           </div>
           <span className="stage-icon hunter">
             <Crosshair size={22} />
           </span>
         </div>
-        <Cue>猎人是否发动技能，带走一位玩家？</Cue>
+        <Cue>该枪手是否发动技能，带走一位玩家？</Cue>
         <div className="field-heading">
-          选择开枪目标 <span>猎人已出局，只能选择存活玩家</span>
+          选择开枪目标 <span>枪手已出局，只能选择存活玩家</span>
         </div>
         <TargetGrid
           players={alive}
@@ -1495,7 +2339,7 @@ function StagePanel({
         />
         {footer(
           () => commit(finishHunter(game)),
-          "确认猎人技能",
+          "确认开枪技能",
           game.hunterTarget === null ? "请选择开枪目标，或选择不开枪。" : null,
         )}
       </div>
@@ -1508,7 +2352,12 @@ function StagePanel({
           <div>
             <span className="step-eyebrow">SPECIAL EVENT / BADGE</span>
             <h2>处理警徽</h2>
-            <p>警长已出局，请记录警徽移交或撕毁。</p>
+            <p>
+              {game.players.find((player) => player.id === game.sheriff)
+                ?.revealed
+                ? "警长因愚者翻牌须移交或撕毁警徽。"
+                : "警长已出局，请记录警徽移交或撕毁。"}
+            </p>
           </div>
           <span className="stage-icon sheriff">
             <Crown size={22} />
@@ -1519,7 +2368,7 @@ function StagePanel({
           警徽去向 <span>只能移交给存活玩家</span>
         </div>
         <TargetGrid
-          players={alive}
+          players={alive.filter((player) => !player.revealed)}
           selected={game.badgeTarget}
           onSelect={(id) =>
             draft((current) => ({ ...current, badgeTarget: id }))
@@ -1535,7 +2384,12 @@ function StagePanel({
     );
 
   if (game.phase === "speech") {
-    const wolves = alive.filter((player) => player.role === "wolf");
+    const wolves = alive.filter(
+      (player) =>
+        player.role === "wolf" ||
+        player.role === "wolfKing" ||
+        player.role === "whiteWolf",
+    );
     return (
       <div className="stage-card">
         <div className="stage-head">
@@ -1580,16 +2434,32 @@ function StagePanel({
                 key={wolf.id}
                 type="button"
                 onClick={() => {
-                  if (window.confirm(`确认 ${playerLabel(wolf.id)}狼人自爆？`))
+                  if (wolf.role === "whiteWolf")
+                    commit(beginWhiteWolf(game, wolf.id));
+                  else if (
+                    window.confirm(`确认 ${playerLabel(wolf.id)}狼人自爆？`)
+                  )
                     commit(explode(game, wolf.id));
                 }}
               >
-                {playerLabel(wolf.id)}自爆
+                {playerLabel(wolf.id)}
+                {wolf.role === "whiteWolf" ? "白狼王自爆" : "自爆"}
               </button>
             ))}
           </div>
           <small>警长竞选阶段自爆与吞警徽规则请由法官线下处理。</small>
         </details>
+        {rolePlayer(game, "knight") && !game.knightUsed && (
+          <div className="day-skill">
+            <button
+              type="button"
+              className="outline-button"
+              onClick={() => commit(beginKnight(game))}
+            >
+              <Swords size={15} /> 记录骑士决斗
+            </button>
+          </div>
+        )}
         {footer(() => commit(finishSpeech(game)), "发言结束，进入投票")}
       </div>
     );
@@ -1597,9 +2467,10 @@ function StagePanel({
 
   if (game.phase === "vote") {
     const tally = tallyVotes(game);
+    const votable = votablePlayers(game);
     const candidates = game.vote.candidates
-      ? alive.filter((player) => game.vote.candidates?.includes(player.id))
-      : alive;
+      ? votable.filter((player) => game.vote.candidates?.includes(player.id))
+      : votable;
     const updateVote = (patch: Partial<Game["vote"]>) =>
       draft((current) => ({ ...current, vote: { ...current.vote, ...patch } }));
     const tie = tally.complete && tally.leaders.length > 1;
@@ -1656,7 +2527,7 @@ function StagePanel({
               选择被放逐的玩家 <span>平票或无人出局时选择“无人出局”</span>
             </div>
             <TargetGrid
-              players={alive}
+              players={votable}
               selected={game.vote.direct}
               onSelect={(id) => updateVote({ direct: id })}
               passLabel="无人出局"
@@ -1988,16 +2859,15 @@ function ModalView({
             </p>
             <h3>当前支持</h3>
             <p>
-              狼人、村民、预言家、女巫、猎人和守卫；警长结果录入、警徽移交、白天自爆、投票计数、平票
-              PK，以及屠边或屠城判胜。
+              狼人、村民、预言家、女巫、猎人、守卫、愚者、骑士、狼王、白狼王、狼美人、奇迹商人、觉醒隐狼和魔镜少女；支持警徽、投票与胜负判定。
             </p>
             <h3>请提前约定</h3>
             <p>
-              可设置女巫自救、同守同救、猎人奶穿状态、双药、狼刀优先和双方同时达成胜利时的处理。默认先处理死亡和猎人技能，再判断胜负。
+              可设置女巫自救、同守同救、狼王夜枪、白狼王带走枪手、最后一狼技能、觉醒隐狼或机械狼版本等规则。默认先处理死亡和枪手技能，再判断胜负。
             </p>
             <h3>暂不自动裁定</h3>
             <p>
-              白痴、狼王、丘比特等特殊角色，警长竞选阶段的自爆与吞警徽，以及复杂的警上资格和遗言规则，请由法官依照桌规线下处理。
+              丘比特等未列出的角色、隐狼模仿其他特殊角色、警长竞选阶段的自爆与吞警徽，以及复杂的警上资格和遗言规则，请由法官依照桌规线下处理。
             </p>
             <div className="note-box">
               <LockKeyhole size={16} />{" "}
@@ -2093,7 +2963,7 @@ function App() {
       "玩家身份：",
       ...game.players.map(
         (player) =>
-          `${player.id} 号：${ROLE_LABELS[player.role]}（${player.alive ? "存活" : "出局"}）`,
+          `${player.id} 号：${roleName(player.role, game.rules)}（${player.alive ? "存活" : "出局"}）`,
       ),
       "",
       "对局记录：",
